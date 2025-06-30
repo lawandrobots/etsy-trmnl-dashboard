@@ -1,4 +1,4 @@
-// server.js - Etsy API server for Railway with debugging
+// server.js - Etsy API server for Railway with trmnl support
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -65,48 +65,11 @@ const mockData = {
   ]
 };
 
-// JSON endpoint specifically for trmnl
-app.get('/trmnl', async (req, res) => {
-  console.log('trmnl endpoint called');
-  
-  try {
-    // Get the same data as the regular API
-    const apiData = await getEtsyData();
-    const { shop, todaysSales, stats } = apiData;
-    
-    // Format for trmnl display
-    const trmnlData = {
-      title: "🛍️ ETSY DASHBOARD",
-      shop_name: shop.shop_name,
-      alert: stats.todaySalesCount > 0 ? `🔔 ${stats.todaySalesCount} NEW SALE${stats.todaySalesCount > 1 ? 'S' : ''} TODAY!` : null,
-      today_revenue: `${stats.todayRevenue.toFixed(2)}`,
-      today_sales: stats.todaySalesCount,
-      monthly_revenue: `${stats.monthlyRevenue.toFixed(2)}`,
-      total_sales: shop.total_sales,
-      recent_sales: todaysSales.slice(0, 5).map(sale => ({
-        amount: `${sale.amount.toFixed(2)}`,
-        items: sale.items.slice(0, 2).join(', '),
-        time: formatTimeForTrmnl(sale.time)
-      })),
-      last_updated: new Date().toLocaleTimeString(),
-      status_message: stats.todaySalesCount > 0 ? "🎉 Great sales today!" : "💪 Keep pushing!"
-    };
-    
-    res.json(trmnlData);
-    
-  } catch (error) {
-    console.error('Error in trmnl endpoint:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch data',
-      message: error.message
-    });
-  }
-});
-
-// Helper function to get Etsy data (extracted from main endpoint)
+// Helper function to get Etsy data
 async function getEtsyData() {
   if (!ETSY_API_KEY || !SHOP_ID) {
-    // Return mock data
+    console.log('Using mock data - no API keys set');
+    
     const todayRevenue = mockData.todaysSales.reduce((sum, order) => 
       sum + parseFloat(order.grandtotal), 0
     );
@@ -128,14 +91,20 @@ async function getEtsyData() {
       }
     };
   }
+
+  console.log('Using real Etsy API');
   
-  // Real API calls would go here
-  // For now, return mock data
-  return getEtsyData();
+  // Real Etsy API calls would go here
+  // For now, return mock data until you add your API keys
+  return await getEtsyData();
 }
 
 function formatTimeForTrmnl(date) {
   const dateObj = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(dateObj.getTime())) {
+    return 'Unknown';
+  }
+  
   const now = new Date();
   const diffMs = now - dateObj;
   const diffMins = Math.floor(diffMs / 60000);
@@ -149,100 +118,77 @@ function formatTimeForTrmnl(date) {
     return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 }
+
+// JSON endpoint specifically for trmnl (flat structure)
+app.get('/trmnl', async (req, res) => {
+  console.log('trmnl endpoint called');
+  
+  try {
+    const apiData = await getEtsyData();
+    const { shop, todaysSales, stats } = apiData;
+    
+    // Format for trmnl display (flat structure, no arrays)
+    const trmnlData = {
+      title: "🛍️ ETSY DASHBOARD",
+      shop_name: shop.shop_name,
+      alert: stats.todaySalesCount > 0 ? `🔔 ${stats.todaySalesCount} NEW SALE${stats.todaySalesCount > 1 ? 'S' : ''} TODAY!` : null,
+      today_revenue: `$${stats.todayRevenue.toFixed(2)}`,
+      today_sales: stats.todaySalesCount.toString(),
+      monthly_revenue: `$${stats.monthlyRevenue.toFixed(2)}`,
+      total_sales: shop.total_sales.toString(),
+      last_updated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      status_message: stats.todaySalesCount > 0 ? "🎉 Great sales today!" : "💪 Keep pushing!"
+    };
+
+    // Add individual sales (up to 5)
+    const salesToShow = todaysSales.slice(0, 5);
+    for (let i = 0; i < 5; i++) {
+      const saleNum = i + 1;
+      if (i < salesToShow.length) {
+        const sale = salesToShow[i];
+        trmnlData[`sale${saleNum}_amount`] = `$${sale.amount.toFixed(2)}`;
+        trmnlData[`sale${saleNum}_items`] = sale.items.slice(0, 2).join(', ');
+        trmnlData[`sale${saleNum}_time`] = formatTimeForTrmnl(sale.time);
+        trmnlData[`has_sale${saleNum}`] = true;
+      } else {
+        trmnlData[`sale${saleNum}_amount`] = "";
+        trmnlData[`sale${saleNum}_items`] = "";
+        trmnlData[`sale${saleNum}_time`] = "";
+        trmnlData[`has_sale${saleNum}`] = false;
+      }
+    }
+
+    // Add flag for whether we have any sales
+    trmnlData.has_sales = todaysSales.length > 0;
+    
+    console.log('Sending trmnl data for', todaysSales.length, 'sales');
+    res.json(trmnlData);
+    
+  } catch (error) {
+    console.error('Error in trmnl endpoint:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch data',
+      message: error.message,
+      title: "🛍️ ETSY DASHBOARD",
+      shop_name: "Error Loading Data",
+      alert: null,
+      today_revenue: "$0.00",
+      today_sales: "0",
+      last_updated: new Date().toLocaleTimeString(),
+      status_message: "❌ Check connection",
+      has_sales: false
+    });
+  }
+});
+
+// Main API endpoint (for web dashboard)
 app.get('/api/etsy-data', async (req, res) => {
   console.log('API endpoint called!');
   
   try {
-    // If no API keys are set, return mock data for testing
-    if (!ETSY_API_KEY || !SHOP_ID) {
-      console.log('Using mock data - no API keys set');
-      
-      const todayRevenue = mockData.todaysSales.reduce((sum, order) => 
-        sum + parseFloat(order.grandtotal), 0
-      );
-      
-      const response = {
-        shop: mockData.shop,
-        todaysSales: mockData.todaysSales.map(sale => ({
-          id: sale.receipt_id,
-          amount: parseFloat(sale.grandtotal),
-          buyer: `Customer #${sale.buyer_user_id}`,
-          time: new Date(sale.creation_timestamp * 1000),
-          items: sale.transactions.map(t => t.title)
-        })),
-        stats: {
-          todayRevenue: todayRevenue,
-          todaySalesCount: mockData.todaysSales.length,
-          monthlyRevenue: 2890.45,
-          monthlySalesCount: 67
-        }
-      };
-      
-      console.log('Sending mock data response');
-      return res.json(response);
-    }
-
-    console.log('Using real Etsy API');
-    
-    // Real Etsy API calls
-    const headers = {
-      'x-api-key': ETSY_API_KEY,
-      'Authorization': `Bearer ${ETSY_API_KEY}`,
-      'Content-Type': 'application/json'
-    };
-
-    // Get shop info
-    const shopResponse = await fetch(
-      `https://openapi.etsy.com/v3/application/shops/${SHOP_ID}`,
-      { headers }
-    );
-    
-    if (!shopResponse.ok) {
-      throw new Error(`Shop API error: ${shopResponse.status}`);
-    }
-    
-    const shopData = await shopResponse.json();
-
-    // Get today's orders
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const minCreated = Math.floor(today.getTime() / 1000);
-
-    const ordersResponse = await fetch(
-      `https://openapi.etsy.com/v3/application/shops/${SHOP_ID}/receipts?min_created=${minCreated}&limit=20&includes=transactions`,
-      { headers }
-    );
-    
-    if (!ordersResponse.ok) {
-      throw new Error(`Orders API error: ${ordersResponse.status}`);
-    }
-    
-    const ordersData = await ordersResponse.json();
-    const orders = ordersData.results || [];
-
-    const todayRevenue = orders.reduce((sum, order) => 
-      sum + parseFloat(order.grandtotal || 0), 0
-    );
-
-    const response = {
-      shop: shopData,
-      todaysSales: orders.map(sale => ({
-        id: sale.receipt_id,
-        amount: parseFloat(sale.grandtotal || 0),
-        buyer: sale.buyer_user_id ? `Customer #${sale.buyer_user_id}` : 'Guest',
-        time: new Date(sale.creation_timestamp * 1000),
-        items: sale.transactions ? sale.transactions.map(t => t.title) : ['Order items']
-      })),
-      stats: {
-        todayRevenue: todayRevenue,
-        todaySalesCount: orders.length,
-        monthlyRevenue: todayRevenue * 15,
-        monthlySalesCount: orders.length * 15
-      }
-    };
-
-    console.log('Sending real API data response');
-    res.json(response);
+    const apiData = await getEtsyData();
+    console.log('Sending API data response');
+    res.json(apiData);
 
   } catch (error) {
     console.error('Error in API endpoint:', error);
@@ -282,6 +228,7 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Dashboard: http://localhost:${PORT}`);
   console.log(`🔧 API: http://localhost:${PORT}/api/etsy-data`);
+  console.log(`📱 trmnl: http://localhost:${PORT}/trmnl`);
   console.log(`❤️  Health: http://localhost:${PORT}/health`);
   
   if (!ETSY_API_KEY || !SHOP_ID) {
