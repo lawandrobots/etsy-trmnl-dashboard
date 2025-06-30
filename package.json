@@ -1,4 +1,4 @@
-json{
+{
   "name": "etsy-trmnl-dashboard",
   "version": "1.0.0",
   "description": "Etsy dashboard for trmnl device",
