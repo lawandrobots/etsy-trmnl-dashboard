@@ -180,11 +180,18 @@
 
             async fetchData() {
                 try {
-                    const response = await fetch(this.config.apiEndpoint);
+                    // Use absolute URL to ensure it works
+                    const apiUrl = window.location.origin + '/api/etsy-data';
+                    console.log('Fetching from:', apiUrl);
+                    
+                    const response = await fetch(apiUrl);
                     if (!response.ok) {
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
-                    this.currentData = await response.json();
+                    const data = await response.json();
+                    console.log('Received data:', data);
+                    
+                    this.currentData = data;
                     this.lastUpdate = new Date();
                 } catch (error) {
                     console.error('Error fetching Etsy data:', error);
